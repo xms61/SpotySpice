@@ -712,7 +712,7 @@ export async function getRandomSongPool({
   // 3. Variety Rejection Sampling & Language Filtering
   const isTargetingSingleArtist = Boolean(queryPlan.artist);
   const songs = [];
-  const clueStats = { title: 0, artist: 0, keyword: 0 };
+  const clueStats = { title: 0, artist: 0, keyword: 0, anime: 0 };
   const rejections = {
     recent: 0,
     duplicateTrack: 0,
@@ -800,13 +800,17 @@ export async function getRandomSongPool({
       }
 
       // Clue type selection:
-      // When targeting a single artist or anime themes, NEVER use 'Artist name' clues
-      // (every clue must be Song title or Keyword, as the performer/anime is already identified in the clue)
+      // When targeting a single artist, NEVER use 'Artist name' clues (100% title or keyword)
+      // When playing anime themes, variate between 'anime', 'title', 'artist', and 'keyword'
       const isAnimeTrack = Boolean(track.isAnimeOped);
-      const allowArtist = !isTargetingSingleArtist && !isAnimeTrack;
+      const allowArtist = !isTargetingSingleArtist;
       let preferredType;
-      if (isTargetingSingleArtist || isAnimeTrack) {
+      if (isTargetingSingleArtist) {
         preferredType = (targetList.length % 2 === 0) ? 'title' : 'keyword';
+      } else if (isAnimeTrack) {
+        // Variate across anime title, song title, artist, and keyword
+        const ANIME_ROTATION = ['anime', 'title', 'artist', 'keyword'];
+        preferredType = ANIME_ROTATION[targetList.length % ANIME_ROTATION.length];
       } else {
         preferredType = PREFERRED_CLUE_ROTATION[targetList.length % PREFERRED_CLUE_ROTATION.length];
         if (seenArtists.has(artistIdentity) && preferredType === 'artist') {
@@ -818,24 +822,33 @@ export async function getRandomSongPool({
       const LENGTH_BUCKET_ROTATION = ['short', 'medium', 'long', 'medium', 'short', 'long', 'medium'];
       const targetLengthBucket = LENGTH_BUCKET_ROTATION[targetList.length % LENGTH_BUCKET_ROTATION.length];
 
-      let keyword = extractAnswerKeyword(track.title, track.artist, { preferredType, allowArtist, seenAnswers, targetLengthBucket });
+      let keyword = extractAnswerKeyword(track.title, track.artist, {
+        preferredType,
+        allowArtist,
+        animeTitle: track.animeTitle,
+        seenAnswers,
+        targetLengthBucket
+      });
 
       // If answer already exists on the grid, fallback:
       if (keyword && seenAnswers.has(keyword.answer)) {
         if (keyword.clueType === 'Artist name') {
           // If there is a co-performer (e.g. Sira in "Ski Aggu & Sira"), try them before giving up on artist clues
-          keyword = extractAnswerKeyword(track.title, track.artist, { preferredType: 'artist', allowArtist, seenAnswers, artistIndex: 1, targetLengthBucket });
+          keyword = extractAnswerKeyword(track.title, track.artist, { preferredType: 'artist', allowArtist, animeTitle: track.animeTitle, seenAnswers, artistIndex: 1, targetLengthBucket });
         }
         if (keyword && seenAnswers.has(keyword.answer)) {
-          keyword = extractAnswerKeyword(track.title, track.artist, { preferredType: 'title', allowArtist, seenAnswers, targetLengthBucket });
+          keyword = extractAnswerKeyword(track.title, track.artist, { preferredType: 'anime', allowArtist, animeTitle: track.animeTitle, seenAnswers, targetLengthBucket });
           if (keyword && seenAnswers.has(keyword.answer)) {
-            keyword = extractAnswerKeyword(track.title, track.artist, { preferredType: 'keyword', allowArtist, seenAnswers, targetLengthBucket });
+            keyword = extractAnswerKeyword(track.title, track.artist, { preferredType: 'title', allowArtist, animeTitle: track.animeTitle, seenAnswers, targetLengthBucket });
+            if (keyword && seenAnswers.has(keyword.answer)) {
+              keyword = extractAnswerKeyword(track.title, track.artist, { preferredType: 'keyword', allowArtist, animeTitle: track.animeTitle, seenAnswers, targetLengthBucket });
+            }
           }
         }
       }
       if (!keyword || seenAnswers.has(keyword.answer)) {
         // Fallback without strict length bucket
-        keyword = extractAnswerKeyword(track.title, track.artist, { preferredType, allowArtist, seenAnswers });
+        keyword = extractAnswerKeyword(track.title, track.artist, { preferredType, allowArtist, animeTitle: track.animeTitle, seenAnswers });
       }
       if (!keyword || seenAnswers.has(keyword.answer)) {
         rejections.noKeyword++;
@@ -845,7 +858,7 @@ export async function getRandomSongPool({
       // Guardrail against generic 2-letter soundtrack abbreviations (TV, OP, ED, OST, BGM)
       // unless the answer is for an authentic artist name
       if (['TV', 'OP', 'ED', 'OST', 'BGM'].includes(keyword.answer) && keyword.clueType !== 'Artist name') {
-        const altKeyword = extractAnswerKeyword(track.title, track.artist, { preferredType: allowArtist ? 'artist' : 'title', allowArtist, seenAnswers, targetLengthBucket });
+        const altKeyword = extractAnswerKeyword(track.title, track.artist, { preferredType: allowArtist ? 'artist' : 'title', allowArtist, animeTitle: track.animeTitle, seenAnswers, targetLengthBucket });
         if (altKeyword && !['TV', 'OP', 'ED', 'OST', 'BGM'].includes(altKeyword.answer)) {
           keyword = altKeyword;
         } else {
@@ -867,6 +880,7 @@ export async function getRandomSongPool({
 
       if (keyword.clueType === 'Song title') clueStats.title++;
       else if (keyword.clueType === 'Artist name') clueStats.artist++;
+      else if (keyword.clueType === 'Anime title') clueStats.anime = (clueStats.anime || 0) + 1;
       else clueStats.keyword++;
 
       const clueText = formatCrosswordClue(track, keyword);

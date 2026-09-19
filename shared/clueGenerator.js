@@ -124,38 +124,56 @@ export function formatCrosswordClue(track, keyword, _options = {}) {
   // Case A: Anime OP/ED Tracks
   // ---------------------------------------------------------------------------
   if (isAnime) {
-    const animeTitle = track.animeTitle || track.album || 'Anime';
+    const animeTitle = track.animeTitle || keyword.animeTitle || track.album || 'Anime';
     const themeType = track.themeType || 'OP';
     const themeSlug = track.themeSlug || `${themeType} Theme`;
     const validArtist = track.artist && !/^(unknown artist|various artists|ost|soundtrack)$/i.test(String(track.artist).trim())
       ? String(track.artist).trim()
       : '';
+    const cleanTitle = cleanClueTitle(track.title);
+
+    if (clueType === 'Anime title') {
+      // User is guessing the anime series/franchise. NEVER mention animeTitle!
+      const fallback = `Anime series featuring this theme${ansLen}`;
+      // Context: can mention themeSlug, year, and cleanTitle (if it doesn't leak answer)
+      const hasTitleLeak = cleanTitle ? containsAnswerLeak(cleanTitle, answer) : true;
+      const hasArtistLeak = validArtist ? containsAnswerLeak(validArtist, answer) : true;
+
+      let candidateClue;
+      if (cleanTitle && !hasTitleLeak) {
+        candidateClue = `Anime featuring the ${themeSlug} theme "${cleanTitle}"${yearSuffix}`;
+      } else if (validArtist && !hasArtistLeak) {
+        candidateClue = `Anime featuring the ${themeSlug} theme by ${validArtist}${yearSuffix}`;
+      } else {
+        candidateClue = `Anime series featuring this ${themeSlug} theme${yearSuffix}`;
+      }
+
+      return sanitizeClue(candidateClue, answer, fallback, [animeTitle, track.animeTitle, keyword.animeTitle].filter(Boolean));
+    }
 
     if (clueType === 'Artist name') {
       // User is guessing the artist/performer. NEVER mention track.artist!
       const fallback = `Performer behind this anime theme${ansLen}`;
-      const candidateClue = `Vocalist / musical act behind the ${themeSlug} of "${animeTitle}"${yearSuffix}`;
+      const candidateClue = `Performer behind the ${themeSlug} of "${animeTitle}"${yearSuffix}`;
       return sanitizeClue(candidateClue, answer, fallback, [track.artist, keyword.artistName].filter(Boolean));
     }
 
     if (clueType === 'Song title') {
       // User is guessing the song title. NEVER mention track.title or track.songTitle!
+      // Do NOT include artist in title clue to keep clue focused on the requested solution
       const fallback = `Theme title from "${animeTitle}"${ansLen}`;
-      const hasArtistLeak = validArtist ? containsAnswerLeak(validArtist, answer, [track.title, track.song_title].filter(Boolean)) : false;
-      const artistPart = validArtist && !hasArtistLeak ? ` by ${validArtist}` : '';
-      const candidateClue = `${themeSlug} of "${animeTitle}"${artistPart}${yearSuffix}`;
+      const candidateClue = `${themeSlug} theme of "${animeTitle}"${yearSuffix}`;
 
-      return sanitizeClue(candidateClue, answer, fallback, [track.title, track.song_title].filter(Boolean));
+      return sanitizeClue(candidateClue, answer, fallback, [track.title, track.song_title, cleanTitle].filter(Boolean));
     }
 
     if (clueType === 'Song title keyword') {
-      // User is guessing a keyword from the song title.
+      // User is guessing a keyword from the song title. NEVER mention keyword or title!
+      // Do NOT include artist in keyword clue
       const fallback = `Key word in theme title from "${animeTitle}"${ansLen}`;
-      const hasArtistLeak = validArtist ? containsAnswerLeak(validArtist, answer) : false;
-      const artistPart = validArtist && !hasArtistLeak ? ` by ${validArtist}` : '';
-      const candidateClue = `Key word in the ${themeSlug} of "${animeTitle}"${artistPart}`;
+      const candidateClue = `Key word in the ${themeSlug} of "${animeTitle}"`;
 
-      return sanitizeClue(candidateClue, answer, fallback, [answer]);
+      return sanitizeClue(candidateClue, answer, fallback, [answer, track.title, track.song_title, cleanTitle].filter(Boolean));
     }
 
     // Default anime fallback

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.12.3] - 2026-09-19
+
+### Added
+- **Three-Way Entity Variation for Anime Crosswords (`shared/musicKeywords.js`, `server/services/musicService.js`)**:
+  - Added support for extracting **Anime Series Titles** (`clueType: 'Anime title'`) as crossword answers alongside **Song Titles** and **Artist Names** (e.g. solving `SOLA`, `COWBOYBEBOP`, `EVANGELION`, `GUNDAM`).
+  - Implemented 4-way balanced rotation across `['anime', 'title', 'artist', 'keyword']` for anime puzzles.
+- **Strict Entity Isolation & Zero-Spoiler Clue Discipline (`shared/clueGenerator.js`)**:
+  - **Anime Title Clues**: Whichever anime franchise is the solution is strictly excluded from clue text (e.g. `Anime featuring the OP2 theme (2007)` or `Anime featuring the OP2 theme by Aira Yuuki (2007)`).
+  - **Artist Clues**: The performer name is strictly excluded from clue text, while providing series and theme context (e.g. `Performer behind the OP2 of "Sola" (2007)`).
+  - **Song Title & Keyword Clues**: Song titles and keywords are strictly excluded, and gratuitous artist mentions (`by <Artist>`) have been eliminated from title/keyword clues to prevent confusion and leaks (e.g. `Key word in the OP2 of "Sola"` instead of `... by Aira Yuuki`).
+
+### Changed
+- **Suite 11 & Suite 12 Test Expansion (`scripts/run_tests.js`)**:
+  - Updated Suite 11 and Suite 12 with tests asserting candidate extraction for anime titles, 3-way rotation, zero leakage across all entities, and strict absence of artist mentions in song title clues.
+
+---
+
 ## [1.12.2] - 2026-09-19
 
 ### Added

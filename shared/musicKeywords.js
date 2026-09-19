@@ -119,7 +119,7 @@ export function splitArtistNames(artistName) {
   return parts.length > 0 ? parts : [raw];
 }
 
-export function extractAllAnswerCandidates(title, artist) {
+export function extractAllAnswerCandidates(title, artist, options = {}) {
   if (!title || !artist) return null;
 
   // Thoroughly strip featured artists and parenthetical annotations from song title
@@ -227,6 +227,71 @@ export function extractAllAnswerCandidates(title, artist) {
     }
   }
 
+  // Anime franchise / series title candidates (2 to 14 letters)
+  let animeCandidate = null;
+  const animeWordCandidates = [];
+  const animeTitle = typeof options === 'object' ? options?.animeTitle : null;
+
+  if (animeTitle) {
+    const unescapedAnime = String(animeTitle)
+      .replace(/&#0*39;|&apos;/gi, "'")
+      .replace(/&quot;/gi, '"')
+      .replace(/&amp;/gi, '&')
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>');
+
+    // Clean brackets, parentheses, and season tags
+    const cleanAnime = unescapedAnime
+      .replace(/\s*[([](?:TV|OVA|OAV|ONA|Movie|Special|Season\s*\d+|2nd Season|\d+(?:st|nd|rd|th)\s*Season)[)\]]/gi, '')
+      .replace(/\s*[([]\s*[^)\]]*\s*[)\]]/g, '')
+      .trim();
+
+    // If title has a subtitle after colon or hyphen, try main franchise title first (e.g. "Naruto: Shippuuden" -> "Naruto")
+    const mainTitlePart = cleanAnime.includes(':')
+      ? cleanAnime.split(':')[0].trim()
+      : (cleanAnime.includes(' - ') ? cleanAnime.split(' - ')[0].trim() : cleanAnime);
+
+    const combinedMain = toCrosswordAnswer(mainTitlePart, { minLength: 2, maxLength: 14 });
+    const combinedFull = toCrosswordAnswer(cleanAnime, { minLength: 2, maxLength: 14 });
+    const chosenCombined = combinedMain || combinedFull;
+
+    if (chosenCombined) {
+      animeCandidate = {
+        answer: chosenCombined,
+        clueType: 'Anime title',
+        clueText: `Anime series title (${chosenCombined.length} letters)`,
+        animeTitle: cleanAnime,
+      };
+    }
+
+    // Also extract individual meaningful words from anime title (e.g. "Mobile Suit Gundam" -> "GUNDAM")
+    const animeWords = cleanAnime
+      .normalize('NFKD')
+      .replace(/\p{M}/gu, '')
+      .replace(/[^a-zA-Z0-9\s]/g, '')
+      .trim()
+      .split(/\s+/)
+      .map(w => toCrosswordAnswer(w, { minLength: 2, maxLength: 12 }))
+      .filter(w => Boolean(w) && !COMMON_STOPWORDS.has(w));
+
+    for (const w of animeWords) {
+      animeWordCandidates.push({
+        answer: w,
+        clueType: 'Anime title',
+        clueText: `Anime series keyword (${w.length} letters)`,
+        animeTitle: cleanAnime,
+      });
+      if (!animeCandidate && w.length >= 3 && w.length <= 12) {
+        animeCandidate = {
+          answer: w,
+          clueType: 'Anime title',
+          clueText: `Anime series keyword (${w.length} letters)`,
+          animeTitle: cleanAnime,
+        };
+      }
+    }
+  }
+
   return {
     title: titleCandidate,
     artist: primaryArtistCandidate,
@@ -234,11 +299,13 @@ export function extractAllAnswerCandidates(title, artist) {
     keyword: keywordCandidate,
     shortKeyword: shortKeywordCandidate,
     wordCandidates,
+    anime: animeCandidate,
+    animeWordCandidates,
   };
 }
 
 export function extractAnswerKeyword(title, artist, options = {}) {
-  const candidates = extractAllAnswerCandidates(title, artist);
+  const candidates = extractAllAnswerCandidates(title, artist, options);
   if (!candidates) return null;
 
   const preferred = typeof options === 'string' ? options : options?.preferredType;
@@ -261,6 +328,10 @@ export function extractAnswerKeyword(title, artist, options = {}) {
   }
 
   const allAvailable = [];
+  if (candidates.anime) allAvailable.push(candidates.anime);
+  if (Array.isArray(candidates.animeWordCandidates)) {
+    allAvailable.push(...candidates.animeWordCandidates);
+  }
   if (candidates.title) allAvailable.push(candidates.title);
   if (candidates.keyword) allAvailable.push(candidates.keyword);
   if (candidates.shortKeyword) allAvailable.push(candidates.shortKeyword);
@@ -296,7 +367,10 @@ export function extractAnswerKeyword(title, artist, options = {}) {
     const bucketMatches = uniqueAvailable.filter(c => (!seenAnswers || !seenAnswers.has(c.answer)) && inLengthBucket(c, targetBucket));
     if (bucketMatches.length > 0) {
       // If preferred type matches within bucket, take it
-      if (preferred === 'artist' && allowArtist) {
+      if (preferred === 'anime') {
+        const anim = bucketMatches.find(c => c.clueType === 'Anime title');
+        if (anim) return anim;
+      } else if (preferred === 'artist' && allowArtist) {
         const art = bucketMatches.find(c => c.clueType === 'Artist name');
         if (art) return art;
       } else if (preferred === 'title') {
@@ -310,7 +384,15 @@ export function extractAnswerKeyword(title, artist, options = {}) {
     }
   }
 
-  if (preferred === 'artist') {
+  if (preferred === 'anime') {
+    if (candidates.anime && (!seenAnswers || !seenAnswers.has(candidates.anime.answer))) {
+      return candidates.anime;
+    }
+    if (Array.isArray(candidates.animeWordCandidates)) {
+      const altWord = candidates.animeWordCandidates.find(c => !seenAnswers || !seenAnswers.has(c.answer));
+      if (altWord) return altWord;
+    }
+  } else if (preferred === 'artist') {
     if (allowArtist) {
       const bestArtist = getBestArtistCandidate();
       if (bestArtist && (!seenAnswers || !seenAnswers.has(bestArtist.answer))) return bestArtist;
@@ -325,27 +407,52 @@ export function extractAnswerKeyword(title, artist, options = {}) {
   }
 
   // Fallback priority order:
-  // Standard mode: title -> artist -> keyword -> shortKeyword
-  // Single-artist mode (allowArtist = false): title -> keyword -> shortKeyword
-  if (candidates.title && (!seenAnswers || !seenAnswers.has(candidates.title.answer))) {
-    return candidates.title;
-  }
-  if (allowArtist) {
-    const bestArtist = getBestArtistCandidate();
-    if (bestArtist && (!seenAnswers || !seenAnswers.has(bestArtist.answer))) {
-      return bestArtist;
+  // If preferred was anime: try title -> artist -> keyword -> shortKeyword
+  // If preferred was title: try artist -> keyword -> shortKeyword -> anime
+  // If preferred was artist: try title -> keyword -> shortKeyword -> anime
+  if (preferred === 'anime') {
+    if (candidates.title && (!seenAnswers || !seenAnswers.has(candidates.title.answer))) {
+      return candidates.title;
     }
-  }
-  if (candidates.keyword && (!seenAnswers || !seenAnswers.has(candidates.keyword.answer))) {
-    return candidates.keyword;
-  }
-  if (candidates.shortKeyword && (!seenAnswers || !seenAnswers.has(candidates.shortKeyword.answer))) {
-    return candidates.shortKeyword;
+    if (allowArtist) {
+      const bestArtist = getBestArtistCandidate();
+      if (bestArtist && (!seenAnswers || !seenAnswers.has(bestArtist.answer))) return bestArtist;
+    }
+    if (candidates.keyword && (!seenAnswers || !seenAnswers.has(candidates.keyword.answer))) {
+      return candidates.keyword;
+    }
+    if (candidates.shortKeyword && (!seenAnswers || !seenAnswers.has(candidates.shortKeyword.answer))) {
+      return candidates.shortKeyword;
+    }
+  } else {
+    if (candidates.title && (!seenAnswers || !seenAnswers.has(candidates.title.answer))) {
+      return candidates.title;
+    }
+    if (allowArtist) {
+      const bestArtist = getBestArtistCandidate();
+      if (bestArtist && (!seenAnswers || !seenAnswers.has(bestArtist.answer))) {
+        return bestArtist;
+      }
+    }
+    if (candidates.keyword && (!seenAnswers || !seenAnswers.has(candidates.keyword.answer))) {
+      return candidates.keyword;
+    }
+    if (candidates.shortKeyword && (!seenAnswers || !seenAnswers.has(candidates.shortKeyword.answer))) {
+      return candidates.shortKeyword;
+    }
+    if (candidates.anime && (!seenAnswers || !seenAnswers.has(candidates.anime.answer))) {
+      return candidates.anime;
+    }
+    if (Array.isArray(candidates.animeWordCandidates)) {
+      const altWord = candidates.animeWordCandidates.find(c => !seenAnswers || !seenAnswers.has(c.answer));
+      if (altWord) return altWord;
+    }
   }
 
   if (candidates.title) return candidates.title;
   if (allowArtist) return getBestArtistCandidate();
   if (candidates.keyword) return candidates.keyword;
+  if (candidates.anime) return candidates.anime;
   return null;
 }
 

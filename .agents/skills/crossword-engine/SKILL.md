@@ -42,9 +42,12 @@ Use this skill when developing or debugging crossword puzzle generation, prompt 
    - For custom prompts with specific keyphrases (e.g. `anime gundam` or `country songs by dolly parton`), multiple tracks from that franchise or artist are allowed without deduplication rejection (`isKeyphraseAnimeMatch`, `isTargetArtist`).
    - The target keyphrase tokens (e.g. `GUNDAM`, `DOLLY`, `PARTON`) are blacklisted from grid answers in `seenAnswers` so the puzzle never asks for the franchise or artist name as a grid solution.
 
-5. **Zero-Spoiler Clue Discipline (`shared/clueGenerator.js`)**:
+5. **Zero-Spoiler Clue Discipline & Entity Isolation (`shared/clueGenerator.js`)**:
    - Clues must **never** leak the solution (`containsAnswerLeak()`).
-   - For Anime tracks: Strictly **0% "Artist name" clues** (100% "Song title" or "Song title keyword" clues) to avoid unengaging seiyuu guesses and spoilers. Clue text specifies the theme slug and anime franchise (e.g. `ED1 of "Jigoku Shoujo Futakomori" by Mamiko Noto (2006)`), never the song title answer.
+   - For Anime tracks: Crosswords variate across **Anime title**, **Song title**, **Artist name**, and **Song title keyword**.
+     - **Anime title clues**: The anime franchise name is strictly excluded from clue text (e.g. `Anime featuring the OP2 theme (2007)`).
+     - **Artist name clues**: The performer name is strictly excluded from clue text, while providing series and theme context (e.g. `Performer behind the OP2 of "Sola" (2007)`).
+     - **Song title & Keyword clues**: Song titles and keywords are strictly excluded, and artist names (`by <Artist>`) are omitted to keep clues focused on the requested solution (e.g. `Key word in the OP2 of "Sola"` instead of `... by Aira Yuuki`).
    - For General `Artist name` clues: Clue text mentions the hit song title, **never** the artist name.
    - For General `Song title` clues: Clue text mentions the artist and release year, **never** the song title.
    - Universal fallback sanitizer (`sanitizeClue`): If any token of length >= 3 from the answer appears in the clue text, automatically fallback to a spoiler-free template.
